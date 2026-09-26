@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import connectToDatabase from '@/lib/mongodb';
 import Blog from '@/models/Blog';
 import { sanitizeBlogHtml } from '@/lib/sanitize-blog-html';
@@ -9,6 +10,8 @@ import { renderBlogSnapshot } from '@/lib/render/blog';
 import { invalidateRelatedPosts } from '@/lib/blog-content/related-index';
 import { notifySiteWebhook } from '@/lib/webhook';
 import { assertBlogAuthorIsUsable } from '@/lib/admin/blog-author';
+import { createBlogRevision } from '@/lib/blog-revisions';
+import type { IBlog } from '@/models/Blog';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,24 +37,47 @@ export const POST = withAdmin(async (req, { user, site }) => {
     siteId: site.id,
     blogStatus: status,
   });
-  const blog = await Blog.create({
-    ...data,
-    content,
-    rendered,
-    status,
-    publishedAt: status === 'publish' ? new Date() : null,
-    siteId: site.id,
-    createdBy: user.id,
-    updatedBy: user.id,
-  });
+  let blog: IBlog | null = null;
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const [created] = await Blog.create(
+        [
+          {
+            ...data,
+            content,
+            rendered,
+            status,
+            publishedAt: status === 'publish' ? new Date() : null,
+            siteId: site.id,
+            createdBy: user.id,
+            updatedBy: user.id,
+          },
+        ],
+        { session },
+      );
+      blog = created;
+      await createBlogRevision({
+        siteId: site.id,
+        blog: created,
+        action: 'created',
+        createdBy: user.id,
+        session,
+      });
+    });
+  } finally {
+    await session.endSession();
+  }
+  if (!blog) throw new Error('Blog creation did not complete');
+  const savedBlog = blog as IBlog;
   invalidateRelatedPosts(site.id);
-  if (blog.status === 'publish') {
+  if (savedBlog.status === 'publish') {
     notifySiteWebhook(site.id, {
       type: 'content.published',
       contentType: 'post',
-      slug: blog.slug,
-      id: blog._id.toString(),
+      slug: savedBlog.slug,
+      id: savedBlog._id.toString(),
     });
   }
-  return NextResponse.json(blog, { status: 201 });
+  return NextResponse.json(savedBlog, { status: 201 });
 });

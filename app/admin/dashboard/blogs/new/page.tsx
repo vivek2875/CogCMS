@@ -14,6 +14,7 @@ import FaqRepeater from '@/components/blog-editor/FaqRepeater';
 import TakeawaysRepeater from '@/components/blog-editor/TakeawaysRepeater';
 import RelatedPicker from '@/components/blog-editor/RelatedPicker';
 import TocEditor, { type TocOverride } from '@/components/blog-editor/TocEditor';
+import VersionHistory from '@/components/blog-editor/VersionHistory';
 import { slugify } from '@/lib/blog-content/slugify';
 import GraphicEditorModal from '@/components/blog-editor/graphics/GraphicEditorModal';
 import { decodeConfig } from '@/lib/blog-content/graphics/encode';
@@ -82,6 +83,32 @@ const ReactQuill = dynamic(
 
 const CLIENT_UPLOAD_MAX_DIMENSION = 2240;
 const CLIENT_UPLOAD_MIN_QUALITY = 0.55;
+
+interface EditorBlogPayload {
+  title?: string;
+  slug?: string;
+  excerpt?: string;
+  imageUrl?: string;
+  tag?: string;
+  isFeatured?: boolean;
+  metaTitle?: string;
+  metaDescription?: string;
+  keywords?: string;
+  createdAt?: string;
+  authorId?: string | null;
+  category?: string;
+  tags?: string[];
+  faqs?: { question: string; answer: string }[];
+  keyTakeaways?: string[];
+  relatedSlugs?: string[];
+  tocOverrides?: TocOverride[];
+  content?: string;
+  status?: 'draft' | 'publish';
+}
+
+function isEditorBlogPayload(value: unknown): value is EditorBlogPayload {
+  return typeof value === 'object' && value !== null;
+}
 
 // ── Content stats helper ──────────────────────────
 function getContentStats(html: string) {
@@ -446,6 +473,7 @@ function EditorForm() {
 
   const [loadingData, setLoadingData] = useState(!!editSlug);
   const [originalSlug, setOriginalSlug] = useState<string | null>(null);
+  const [currentStatus, setCurrentStatus] = useState<'draft' | 'publish' | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -496,49 +524,58 @@ function EditorForm() {
   const excerptRef = useRef<HTMLTextAreaElement>(null);
   const initialSnapshotRef = useRef<string>('');
 
+  const hydrateBlog = useCallback((data: EditorBlogPayload) => {
+    const hydrated = {
+      title: data.title || '',
+      slug: data.slug || '',
+      excerpt: data.excerpt || '',
+      imageUrl: data.imageUrl || '',
+      tag: data.tag || 'Insights',
+      isFeatured: !!data.isFeatured,
+      metaTitle: data.metaTitle || '',
+      metaDescription: data.metaDescription || '',
+      keywords: data.keywords || '',
+      createdAt: data.createdAt
+        ? new Date(data.createdAt).toISOString().substring(0, 10)
+        : new Date().toISOString().substring(0, 10),
+      authorId: data.authorId || null,
+      category: data.category || data.tag || 'Insights',
+      tags: Array.isArray(data.tags) && data.tags.length ? data.tags : data.tag ? [data.tag] : [],
+      faqs: Array.isArray(data.faqs) ? data.faqs : [],
+      keyTakeaways: Array.isArray(data.keyTakeaways) ? data.keyTakeaways : [],
+      relatedSlugs: Array.isArray(data.relatedSlugs) ? data.relatedSlugs : [],
+      tocOverrides: Array.isArray(data.tocOverrides) ? data.tocOverrides : [],
+    };
+    const restoredContent = data.content || '';
+    setFormData(hydrated);
+    setContent(restoredContent);
+    setCurrentStatus(data.status === 'publish' ? 'publish' : 'draft');
+    setSlugManuallyEdited(true);
+    initialSnapshotRef.current = JSON.stringify({ ...hydrated, content: restoredContent });
+  }, []);
+
   // Fetch existing blog if editSlug
   useEffect(() => {
     if (!editSlug) return;
     setOriginalSlug(editSlug);
     setLoadingData(true);
-    fetch(`/api/admin/blogs/${editSlug}`, { cache: 'no-store' })
-      .then((res) => res.json())
+    const controller = new AbortController();
+    fetch(`/api/admin/blogs/${encodeURIComponent(editSlug)}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then((res) => res.json() as Promise<unknown>)
       .then((data) => {
-        if (!data.error) {
-          const hydrated = {
-            title: data.title || '',
-            slug: data.slug || '',
-            excerpt: data.excerpt || '',
-            imageUrl: data.imageUrl || '',
-            tag: data.tag || 'Insights',
-            isFeatured: !!data.isFeatured,
-            metaTitle: data.metaTitle || '',
-            metaDescription: data.metaDescription || '',
-            keywords: data.keywords || '',
-            createdAt: data.createdAt
-              ? new Date(data.createdAt).toISOString().substring(0, 10)
-              : new Date().toISOString().substring(0, 10),
-            authorId: data.authorId || null,
-            category: data.category || data.tag || 'Insights',
-            tags:
-              Array.isArray(data.tags) && data.tags.length ? data.tags : data.tag ? [data.tag] : [],
-            faqs: Array.isArray(data.faqs) ? data.faqs : [],
-            keyTakeaways: Array.isArray(data.keyTakeaways) ? data.keyTakeaways : [],
-            relatedSlugs: Array.isArray(data.relatedSlugs) ? data.relatedSlugs : [],
-            tocOverrides: Array.isArray(data.tocOverrides) ? data.tocOverrides : [],
-          };
-          setFormData(hydrated);
-          setContent(data.content || '');
-          setSlugManuallyEdited(true);
-          initialSnapshotRef.current = JSON.stringify({
-            ...hydrated,
-            content: data.content || '',
-          });
-        }
+        if (isEditorBlogPayload(data) && !('error' in data)) hydrateBlog(data);
       })
-      .catch(console.error)
-      .finally(() => setLoadingData(false));
-  }, [editSlug]);
+      .catch((fetchError: unknown) => {
+        if ((fetchError as Error).name !== 'AbortError') setError('Unable to load the blog.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingData(false);
+      });
+    return () => controller.abort();
+  }, [editSlug, hydrateBlog, site?.id]);
 
   useEffect(() => {
     if (!editSlug) {
@@ -628,23 +665,26 @@ function EditorForm() {
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
-      try {
-        setLoading(true);
-        setError(null);
-        const imageUrl = await uploadImageFile(file, site?.id);
-        setFormData((prev) => ({ ...prev, imageUrl }));
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        try {
+          setLoading(true);
+          setError(null);
+          const imageUrl = await uploadImageFile(file, site?.id);
+          setFormData((prev) => ({ ...prev, imageUrl }));
+        } catch (err: any) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
       }
-    }
-  }, [site?.id]);
+    },
+    [site?.id],
+  );
 
   // ── Insert actions — use Quill API at cursor ───
   const handleInsertImage = () => {
@@ -1034,6 +1074,15 @@ function EditorForm() {
               <line x1="8" y1="14" x2="16" y2="14" />
             </svg>
           </button>
+
+          <VersionHistory
+            slug={originalSlug}
+            siteId={site?.id}
+            isPublished={currentStatus === 'publish'}
+            onRestored={(blog) => {
+              if (isEditorBlogPayload(blog)) hydrateBlog(blog);
+            }}
+          />
 
           <button
             type="button"

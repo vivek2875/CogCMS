@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import connectToDatabase from '@/lib/mongodb';
 import Blog from '@/models/Blog';
 import { sanitizeBlogHtml } from '@/lib/sanitize-blog-html';
@@ -9,6 +10,9 @@ import { renderBlogSnapshot } from '@/lib/render/blog';
 import { invalidateRelatedPosts } from '@/lib/blog-content/related-index';
 import { deliveryEventType, notifySiteWebhook } from '@/lib/webhook';
 import { assertBlogAuthorIsUsable } from '@/lib/admin/blog-author';
+import BlogRevision from '@/models/BlogRevision';
+import { createBlogRevision } from '@/lib/blog-revisions';
+import type { IBlog } from '@/models/Blog';
 
 export const dynamic = 'force-dynamic';
 type Params = { slug: string };
@@ -48,23 +52,57 @@ export const PUT = withAdmin<Params>(async (req, { params, user, site }) => {
   }
   if (parsed.data.status === 'publish' && !existing.publishedAt) update.publishedAt = new Date();
 
-  const blog = await Blog.findOneAndUpdate(
-    { _id: existing._id, siteId: site.id },
-    { $set: update },
-    { returnDocument: 'after', runValidators: true },
-  ).exec();
+  let blog: IBlog | null = null;
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      // Read inside the transaction so a legacy baseline is the exact pre-write state.
+      const current = await Blog.findOne({ _id: existing._id, siteId: site.id })
+        .session(session)
+        .exec();
+      if (!current) throw notFound('Blog');
+      const hasHistory = await BlogRevision.exists({ siteId: site.id, blogId: current._id })
+        .session(session)
+        .exec();
+      if (!hasHistory) {
+        await createBlogRevision({
+          siteId: site.id,
+          blog: current,
+          action: 'created',
+          createdBy: current.createdBy,
+          session,
+        });
+      }
+      blog = await Blog.findOneAndUpdate(
+        { _id: current._id, siteId: site.id },
+        { $set: update },
+        { returnDocument: 'after', runValidators: true, session },
+      ).exec();
+      if (!blog) throw notFound('Blog');
+      await createBlogRevision({
+        siteId: site.id,
+        blog,
+        action: 'updated',
+        createdBy: user.id,
+        session,
+      });
+    });
+  } finally {
+    await session.endSession();
+  }
   if (!blog) throw notFound('Blog');
+  const savedBlog = blog as IBlog;
   invalidateRelatedPosts(site.id);
-  const eventType = deliveryEventType(existing.status, blog.status);
+  const eventType = deliveryEventType(existing.status, savedBlog.status);
   if (eventType) {
     notifySiteWebhook(site.id, {
       type: eventType,
       contentType: 'post',
-      slug: blog.slug,
-      id: blog._id.toString(),
+      slug: savedBlog.slug,
+      id: savedBlog._id.toString(),
     });
   }
-  return NextResponse.json(blog);
+  return NextResponse.json(savedBlog);
 });
 
 export const DELETE = withAdmin<Params>(async (_req, { params, site }) => {
