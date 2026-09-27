@@ -77,9 +77,10 @@ describe('site-scoped blog version history', () => {
     );
     expect(list.status).toBe(200);
     const listed = await list.json();
-    expect(listed).toHaveLength(2);
-    expect(listed[0].createdAt >= listed[1].createdAt).toBe(true);
-    expect(listed[0]).not.toHaveProperty('snapshot');
+    expect(listed.data).toHaveLength(2);
+    expect(listed.meta).toMatchObject({ page: 1, limit: 20, total: 2, totalPages: 1 });
+    expect(listed.data[0].createdAt >= listed.data[1].createdAt).toBe(true);
+    expect(listed.data[0]).not.toHaveProperty('snapshot');
 
     const detail = await getRevision(
       await authenticatedRequest(

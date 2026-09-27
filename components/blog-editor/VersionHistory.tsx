@@ -41,11 +41,13 @@ export default function VersionHistory({
   slug,
   siteId,
   isPublished,
+  hasUnsavedChanges,
   onRestored,
 }: {
   slug: string | null;
   siteId: string | undefined;
   isPublished: boolean;
+  hasUnsavedChanges: boolean;
   onRestored: (blog: unknown) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -75,8 +77,14 @@ export default function VersionHistory({
       });
       if (!response.ok) throw new Error(await responseMessage(response));
       const payload: unknown = await response.json();
-      if (!Array.isArray(payload)) throw new Error('Unable to load version history.');
-      setRevisions(payload as RevisionSummary[]);
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        !('data' in payload) ||
+        !Array.isArray((payload as { data: unknown }).data)
+      )
+        throw new Error('Unable to load version history.');
+      setRevisions((payload as { data: RevisionSummary[] }).data);
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
         setLoadError(error instanceof Error ? error.message : 'Unable to load version history.');
@@ -289,6 +297,12 @@ export default function VersionHistory({
             </AlertDialog.Title>
             <AlertDialog.Description className="mt-2 text-sm text-gray-600">
               The current version will remain available in version history.
+              {hasUnsavedChanges && (
+                <span className="mt-3 block font-medium text-amber-800">
+                  You have unsaved editor changes. Restoring this version will discard those local
+                  changes.
+                </span>
+              )}
               {isPublished && (
                 <span className="mt-3 block font-medium text-amber-800">
                   This blog is currently published. Restoring this version may immediately update

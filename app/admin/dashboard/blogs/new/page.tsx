@@ -1079,6 +1079,7 @@ function EditorForm() {
             slug={originalSlug}
             siteId={site?.id}
             isPublished={currentStatus === 'publish'}
+            hasUnsavedChanges={hasUnsavedChanges}
             onRestored={(blog) => {
               if (isEditorBlogPayload(blog)) hydrateBlog(blog);
             }}

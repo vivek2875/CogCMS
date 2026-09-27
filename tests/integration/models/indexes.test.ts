@@ -4,6 +4,7 @@ import { modelRegistry } from '@/scripts/model-registry';
 import Author from '@/models/Author';
 import ApiKey from '@/models/ApiKey';
 import Blog from '@/models/Blog';
+import BlogRevision from '@/models/BlogRevision';
 import NewsletterSubscriber from '@/models/NewsletterSubscriber';
 import ReleaseNote from '@/models/ReleaseNote';
 import Whitepaper from '@/models/Whitepaper';
@@ -28,6 +29,7 @@ describe('model registry and indexes', () => {
       'users',
       'login_attempts',
       'blogs',
+      'blog_revisions',
       'authors',
       'faqs',
       'faq_submissions',
@@ -50,6 +52,11 @@ describe('model registry and indexes', () => {
     expect(
       blogIndexes.find((index) => index.key.siteId === 1 && index.key.slug === 1)?.unique,
     ).toBe(true);
+
+    const revisionIndexes = await BlogRevision.collection.indexes();
+    expect(revisionIndexes.map((index) => index.key)).toEqual(
+      expect.arrayContaining([{ _id: 1 }, { siteId: 1, blogId: 1, createdAt: -1, _id: -1 }]),
+    );
 
     const releaseNoteIndexes = await ReleaseNote.collection.indexes();
     expect(releaseNoteIndexes.map((index) => index.key)).toEqual(

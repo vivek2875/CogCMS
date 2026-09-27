@@ -10,6 +10,7 @@ import { assertBlogAuthorIsUsable } from '@/lib/admin/blog-author';
 import { notFound, validationError } from '@/lib/http/errors';
 import { withAdmin } from '@/lib/http/admin-handler';
 import { invalidateRelatedPosts } from '@/lib/blog-content/related-index';
+import { notifySiteWebhook } from '@/lib/webhook';
 
 export const dynamic = 'force-dynamic';
 type Params = { slug: string; revisionId: string };
@@ -92,6 +93,15 @@ export const POST = withAdmin<Params>(async (_req, { params, site, user }) => {
     await session.endSession();
   }
   if (!restored) throw notFound('Blog');
+  const restoredBlog = restored as IBlog;
   invalidateRelatedPosts(site.id);
-  return NextResponse.json(restored);
+  if (restoredBlog.status === 'publish') {
+    notifySiteWebhook(site.id, {
+      type: 'content.updated',
+      contentType: 'post',
+      slug: restoredBlog.slug,
+      id: restoredBlog._id.toString(),
+    });
+  }
+  return NextResponse.json(restoredBlog);
 });

@@ -108,15 +108,26 @@ export const PUT = withAdmin<Params>(async (req, { params, user, site }) => {
 export const DELETE = withAdmin<Params>(async (_req, { params, site }) => {
   const { slug } = await params;
   await connectToDatabase();
-  const blog = await Blog.findOneAndDelete({ slug, siteId: site.id }).exec();
+  let blog: IBlog | null = null;
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      blog = await Blog.findOneAndDelete({ slug, siteId: site.id }, { session }).exec();
+      if (!blog) throw notFound('Blog');
+      await BlogRevision.deleteMany({ siteId: site.id, blogId: blog._id }, { session }).exec();
+    });
+  } finally {
+    await session.endSession();
+  }
   if (!blog) throw notFound('Blog');
+  const deletedBlog = blog as IBlog;
   invalidateRelatedPosts(site.id);
-  if (blog.status === 'publish') {
+  if (deletedBlog.status === 'publish') {
     notifySiteWebhook(site.id, {
       type: 'content.deleted',
       contentType: 'post',
-      slug: blog.slug,
-      id: blog._id.toString(),
+      slug: deletedBlog.slug,
+      id: deletedBlog._id.toString(),
     });
   }
   return NextResponse.json({ message: 'Deleted successfully' });
