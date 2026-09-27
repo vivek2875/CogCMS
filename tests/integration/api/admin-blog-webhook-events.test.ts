@@ -9,6 +9,8 @@ vi.mock('@/lib/webhook', async (importOriginal) => ({
 import { POST as createBlog } from '@/app/api/admin/blogs/route';
 import { DELETE as deleteBlog, PUT as updateBlog } from '@/app/api/admin/blogs/[slug]/route';
 import { POST as restoreRevision } from '@/app/api/admin/blogs/[slug]/revisions/[revisionId]/restore/route';
+import Author from '@/models/Author';
+import Blog from '@/models/Blog';
 import BlogRevision from '@/models/BlogRevision';
 import { authenticatedRequest, createTestSite, createTestUser } from '@/tests/setup/factories';
 
@@ -174,6 +176,73 @@ describe('blog webhook events', () => {
     );
     expect(failed.status).toBe(400);
     expect(notifySiteWebhook).not.toHaveBeenCalled();
+  });
+
+  it('does not notify when a published restore references a deleted author', async () => {
+    const site = await createTestSite();
+    const user = await createTestUser({ siteIds: [site._id.toString()] });
+    const created = await createBlog(
+      await authenticatedRequest('http://localhost:3003/api/admin/blogs', {
+        user,
+        siteId: site._id.toString(),
+        method: 'POST',
+        json: payload,
+      }),
+      rootContext,
+    );
+    const blog = await created.json();
+    const source = await BlogRevision.findOne({ siteId: site._id, blogId: blog._id }).lean().exec();
+    expect(source).not.toBeNull();
+    const author = await Author.create({
+      siteId: site._id,
+      name: 'Deleted author',
+      slug: 'deleted-author',
+      status: 'publish',
+      createdBy: user._id,
+      updatedBy: user._id,
+    });
+    const unusableRevision = await BlogRevision.create({
+      siteId: site._id,
+      blogId: blog._id,
+      action: 'updated',
+      createdBy: user._id,
+      restoredFromRevisionId: null,
+      snapshot: {
+        ...source!.snapshot,
+        title: 'Unusable author revision',
+        authorId: author._id,
+      },
+    });
+    await Author.deleteOne({ _id: author._id, siteId: site._id });
+    const revisionCount = await BlogRevision.countDocuments({ siteId: site._id, blogId: blog._id });
+    notifySiteWebhook.mockReset();
+
+    const restored = await restoreRevision(
+      await authenticatedRequest(
+        `http://localhost:3003/api/admin/blogs/webhook-post/revisions/${unusableRevision._id}/restore`,
+        { user, siteId: site._id.toString(), method: 'POST', json: {} },
+      ),
+      {
+        params: Promise.resolve({
+          slug: 'webhook-post',
+          revisionId: unusableRevision._id.toString(),
+        }),
+      },
+    );
+    expect(restored.status).toBe(400);
+    expect(notifySiteWebhook).not.toHaveBeenCalled();
+    expect((await Blog.findById(blog._id).lean().exec())?.title).toBe('Webhook post');
+    expect(await BlogRevision.countDocuments({ siteId: site._id, blogId: blog._id })).toBe(
+      revisionCount,
+    );
+    expect(
+      await BlogRevision.exists({
+        siteId: site._id,
+        blogId: blog._id,
+        action: 'restored',
+        restoredFromRevisionId: unusableRevision._id,
+      }),
+    ).toBeNull();
   });
 
   it('keeps existing public deletion notifications and skips draft deletion notifications', async () => {

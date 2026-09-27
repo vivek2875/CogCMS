@@ -332,6 +332,13 @@ describe('site-scoped blog version history', () => {
     );
     expect(otherBlog.status).toBe(201);
     const otherBlogBody = await otherBlog.json();
+    const otherSiteRevision = await BlogRevision.findOne({
+      siteId: otherSite._id,
+      blogId: otherBlogBody._id,
+    })
+      .lean()
+      .exec();
+    expect(otherSiteRevision).not.toBeNull();
 
     const requestList = async (query = '') => {
       const response = await listRevisions(
@@ -373,9 +380,14 @@ describe('site-scoped blog version history', () => {
 
     const clientSuppliedSite = await requestList(`?siteId=${otherSite._id.toString()}`);
     expect(clientSuppliedSite.body.meta.total).toBe(25);
-    expect(clientSuppliedSite.body.data).not.toContainEqual(
-      expect.objectContaining({ blogId: otherBlogBody._id }),
-    );
+    expect(
+      clientSuppliedSite.body.data.map((revision: { _id: string }) => revision._id),
+    ).not.toContain(otherSiteRevision!._id.toString());
+    expect(
+      clientSuppliedSite.body.data.every(
+        (revision: Record<string, unknown>) => !('snapshot' in revision),
+      ),
+    ).toBe(true);
 
     for (const query of [
       '?page=0',
