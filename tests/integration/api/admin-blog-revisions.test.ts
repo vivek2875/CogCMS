@@ -331,6 +331,7 @@ describe('site-scoped blog version history', () => {
       rootContext,
     );
     expect(otherBlog.status).toBe(201);
+    const otherBlogBody = await otherBlog.json();
 
     const requestList = async (query = '') => {
       const response = await listRevisions(
@@ -373,7 +374,7 @@ describe('site-scoped blog version history', () => {
     const clientSuppliedSite = await requestList(`?siteId=${otherSite._id.toString()}`);
     expect(clientSuppliedSite.body.meta.total).toBe(25);
     expect(clientSuppliedSite.body.data).not.toContainEqual(
-      expect.objectContaining({ blogId: otherBlog._id }),
+      expect.objectContaining({ blogId: otherBlogBody._id }),
     );
 
     for (const query of [
