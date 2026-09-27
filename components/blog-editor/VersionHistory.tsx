@@ -80,6 +80,14 @@ export default function VersionHistory({
   const detailControllerRef = useRef<AbortController | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const resetDetail = useCallback(() => {
+    detailControllerRef.current?.abort();
+    detailControllerRef.current = null;
+    setDetail(null);
+    setDetailLoading(false);
+    setDetailError('');
+    setRestoreError('');
+  }, []);
 
   const loadRevisions = useCallback(async () => {
     if (!slug) return;
@@ -120,14 +128,14 @@ export default function VersionHistory({
 
   useEffect(() => {
     if (!open) return;
-    setDetail(null);
+    resetDetail();
     setSuccess('');
     void loadRevisions();
     return () => {
       controllerRef.current?.abort();
       detailControllerRef.current?.abort();
     };
-  }, [loadRevisions, open]);
+  }, [loadRevisions, open, resetDetail]);
 
   useEffect(() => {
     if (!open) {
@@ -139,17 +147,12 @@ export default function VersionHistory({
 
   useEffect(() => {
     setPage(1);
-    setDetail(null);
-    detailControllerRef.current?.abort();
-  }, [slug, siteId]);
+    resetDetail();
+  }, [slug, siteId, resetDetail]);
 
   const inspect = async (revisionId: string) => {
     if (!slug) return;
-    detailControllerRef.current?.abort();
-    setDetail(null);
-    setDetailLoading(false);
-    setDetailError('');
-    setRestoreError('');
+    resetDetail();
     const controller = new AbortController();
     detailControllerRef.current = controller;
     setDetailLoading(true);
@@ -297,7 +300,7 @@ export default function VersionHistory({
                     type="button"
                     disabled={meta.page <= 1}
                     onClick={() => {
-                      setDetail(null);
+                      resetDetail();
                       setPage((value) => value - 1);
                     }}
                     className="rounded border px-3 py-1 disabled:opacity-50"
@@ -308,7 +311,7 @@ export default function VersionHistory({
                     type="button"
                     disabled={meta.page >= meta.totalPages}
                     onClick={() => {
-                      setDetail(null);
+                      resetDetail();
                       setPage((value) => value + 1);
                     }}
                     className="rounded border px-3 py-1 disabled:opacity-50"
