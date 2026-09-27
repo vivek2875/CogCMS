@@ -26,10 +26,21 @@ interface PaginationMeta {
 }
 function isPaginationMeta(value: unknown): value is PaginationMeta {
   if (typeof value !== 'object' || value === null) return false;
-  return ['page', 'limit', 'total', 'totalPages'].every((key) => {
-    const item = (value as Record<string, unknown>)[key];
-    return typeof item === 'number' && Number.isSafeInteger(item) && item >= 0;
-  });
+  const meta = value as Record<string, unknown>;
+  return (
+    typeof meta.page === 'number' &&
+    Number.isSafeInteger(meta.page) &&
+    meta.page > 0 &&
+    typeof meta.limit === 'number' &&
+    Number.isSafeInteger(meta.limit) &&
+    meta.limit > 0 &&
+    typeof meta.total === 'number' &&
+    Number.isSafeInteger(meta.total) &&
+    meta.total >= 0 &&
+    typeof meta.totalPages === 'number' &&
+    Number.isSafeInteger(meta.totalPages) &&
+    meta.totalPages >= 0
+  );
 }
 
 function actorName(actor: RevisionActor): string {
@@ -88,6 +99,14 @@ export default function VersionHistory({
     setDetailError('');
     setRestoreError('');
   }, []);
+  const closeHistory = useCallback(() => {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    setLoading(false);
+    setLoadError('');
+    resetDetail();
+    setOpen(false);
+  }, [resetDetail]);
 
   const loadRevisions = useCallback(async () => {
     if (!slug) return;
@@ -217,7 +236,7 @@ export default function VersionHistory({
           aria-modal="true"
           aria-labelledby="version-history-title"
           onKeyDown={(event) => {
-            if (event.key === 'Escape') setOpen(false);
+            if (event.key === 'Escape') closeHistory();
           }}
         >
           <section className="h-full w-full max-w-xl bg-white shadow-2xl overflow-y-auto p-5 sm:p-7">
@@ -233,7 +252,7 @@ export default function VersionHistory({
               <button
                 type="button"
                 ref={closeRef}
-                onClick={() => setOpen(false)}
+                onClick={closeHistory}
                 className="rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100"
                 aria-label="Close version history"
               >
