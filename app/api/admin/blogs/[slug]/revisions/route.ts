@@ -23,6 +23,10 @@ export const GET = withAdmin<Params>(async (req, { params, site }) => {
   const { slug } = await params;
   const page = positiveInteger(req.nextUrl.searchParams.get('page'), 1);
   const limit = positiveInteger(req.nextUrl.searchParams.get('limit'), 20, 100);
+  const offset = (page - 1) * limit;
+  if (!Number.isSafeInteger(offset)) {
+    throw validationError({ page, limit }, 'Invalid pagination parameters');
+  }
   await connectToDatabase();
   const blog = await Blog.findOne({ slug, siteId: site.id }).select('_id').lean().exec();
   if (!blog) throw notFound('Blog');
@@ -32,7 +36,7 @@ export const GET = withAdmin<Params>(async (req, { params, site }) => {
     BlogRevision.find(filter)
       .select('_id action createdAt createdBy restoredFromRevisionId')
       .sort({ createdAt: -1, _id: -1 })
-      .skip((page - 1) * limit)
+      .skip(offset)
       .limit(limit)
       .populate({ path: 'createdBy', select: 'name' })
       .lean()

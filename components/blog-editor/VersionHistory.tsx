@@ -52,6 +52,8 @@ export default function VersionHistory({
 }) {
   const [open, setOpen] = useState(false);
   const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [detail, setDetail] = useState<RevisionDetail | null>(null);
@@ -62,6 +64,9 @@ export default function VersionHistory({
   const [restoreError, setRestoreError] = useState('');
   const [success, setSuccess] = useState('');
   const controllerRef = useRef<AbortController | null>(null);
+  const detailControllerRef = useRef<AbortController | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   const loadRevisions = useCallback(async () => {
     if (!slug) return;
@@ -71,10 +76,13 @@ export default function VersionHistory({
     setLoading(true);
     setLoadError('');
     try {
-      const response = await fetch(`/api/admin/blogs/${encodeURIComponent(slug)}/revisions`, {
-        cache: 'no-store',
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        `/api/admin/blogs/${encodeURIComponent(slug)}/revisions?page=${page}&limit=20`,
+        {
+          cache: 'no-store',
+          signal: controller.signal,
+        },
+      );
       if (!response.ok) throw new Error(await responseMessage(response));
       const payload: unknown = await response.json();
       if (
@@ -85,6 +93,7 @@ export default function VersionHistory({
       )
         throw new Error('Unable to load version history.');
       setRevisions((payload as { data: RevisionSummary[] }).data);
+      setMeta((payload as { meta: typeof meta }).meta);
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
         setLoadError(error instanceof Error ? error.message : 'Unable to load version history.');
@@ -92,32 +101,53 @@ export default function VersionHistory({
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [slug, siteId]);
+  }, [slug, siteId, page]);
 
   useEffect(() => {
     if (!open) return;
     setDetail(null);
     setSuccess('');
     void loadRevisions();
-    return () => controllerRef.current?.abort();
+    return () => {
+      controllerRef.current?.abort();
+      detailControllerRef.current?.abort();
+    };
   }, [loadRevisions, open]);
+
+  useEffect(() => {
+    if (!open) {
+      triggerRef.current?.focus();
+      return;
+    }
+    closeRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    setPage(1);
+    setDetail(null);
+    detailControllerRef.current?.abort();
+  }, [slug, siteId]);
 
   const inspect = async (revisionId: string) => {
     if (!slug) return;
+    detailControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailControllerRef.current = controller;
     setDetailLoading(true);
     setDetailError('');
     setRestoreError('');
     try {
       const response = await fetch(
         `/api/admin/blogs/${encodeURIComponent(slug)}/revisions/${encodeURIComponent(revisionId)}`,
-        { cache: 'no-store' },
+        { cache: 'no-store', signal: controller.signal },
       );
       if (!response.ok) throw new Error(await responseMessage(response));
-      setDetail((await response.json()) as RevisionDetail);
+      if (!controller.signal.aborted) setDetail((await response.json()) as RevisionDetail);
     } catch (error) {
-      setDetailError(error instanceof Error ? error.message : 'Unable to load this revision.');
+      if ((error as Error).name !== 'AbortError')
+        setDetailError(error instanceof Error ? error.message : 'Unable to load this revision.');
     } finally {
-      setDetailLoading(false);
+      if (!controller.signal.aborted) setDetailLoading(false);
     }
   };
 
@@ -147,6 +177,7 @@ export default function VersionHistory({
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
         className="px-3 py-2 text-[13px] text-gray-600 hover:bg-gray-50 border rounded-full transition-colors"
@@ -160,7 +191,7 @@ export default function VersionHistory({
           className="fixed inset-0 z-[90] bg-black/30 flex justify-end"
           role="dialog"
           aria-modal="true"
-          aria-label="Version history"
+          aria-labelledby="version-history-title"
           onKeyDown={(event) => {
             if (event.key === 'Escape') setOpen(false);
           }}
@@ -168,13 +199,16 @@ export default function VersionHistory({
           <section className="h-full w-full max-w-xl bg-white shadow-2xl overflow-y-auto p-5 sm:p-7">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Version history</h2>
+                <h2 id="version-history-title" className="text-lg font-semibold text-gray-900">
+                  Version history
+                </h2>
                 <p className="mt-1 text-sm text-gray-500">
                   Inspect a saved version before restoring it.
                 </p>
               </div>
               <button
                 type="button"
+                ref={closeRef}
                 onClick={() => setOpen(false)}
                 className="rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100"
                 aria-label="Close version history"
@@ -234,6 +268,37 @@ export default function VersionHistory({
                 </li>
               ))}
             </ol>
+            {!loading && !loadError && meta.totalPages > 0 && (
+              <div className="mt-5 flex items-center justify-between text-sm text-gray-600">
+                <span>
+                  Page {meta.page} of {meta.totalPages} · {meta.total} versions
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={meta.page <= 1}
+                    onClick={() => {
+                      setDetail(null);
+                      setPage((value) => value - 1);
+                    }}
+                    className="rounded border px-3 py-1 disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={meta.page >= meta.totalPages}
+                    onClick={() => {
+                      setDetail(null);
+                      setPage((value) => value + 1);
+                    }}
+                    className="rounded border px-3 py-1 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
 
             {(detailLoading || detailError || detail) && (
               <div className="mt-7 border-t border-gray-200 pt-5">

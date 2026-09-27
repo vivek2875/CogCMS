@@ -76,7 +76,7 @@ No dependency was added for this feature: it uses Mongoose transactions/indexes,
 
 Run `npm run typecheck`, `npm test`, and `npm run build` after configuring the local replica set described above. For manual verification: create and edit a blog twice; inspect newest-first history; restore an older revision; verify that content changes while slug/status/`publishedAt` remain unchanged; switch active sites and confirm the history is absent; then test the loading/error retry, success message, keyboard close/confirmation, and a narrow viewport.
 
-Revision lists intentionally omit the potentially large snapshot content; details fetch it only on demand. The UI currently offers snapshot inspection rather than a rich visual diff, and histories are retained indefinitely pending a future retention policy.
+Revision lists intentionally omit the potentially large snapshot content; details fetch it only on demand. History is paginated at 20 revisions by default (maximum 100) and revisions are retained for the lifetime of a blog. Permanently deleting a blog transactionally deletes its associated revisions. Restore warns about unsaved editor changes, preserves the current slug, status and publication timestamp, records a new pre-restoration revision, and emits `content.updated` only when the restored blog is published (draft restores send no publishing webhook). Legacy blogs receive a baseline revision on first edit. The UI currently offers snapshot inspection rather than a rich visual diff.
 
 ## Community and maintenance
 
