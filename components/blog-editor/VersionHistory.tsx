@@ -95,6 +95,8 @@ export default function VersionHistory({
     const controller = new AbortController();
     controllerRef.current = controller;
     setLoading(true);
+    setRevisions([]);
+    setDetail(null);
     setLoadError('');
     try {
       const response = await fetch(
@@ -266,7 +268,7 @@ export default function VersionHistory({
                 No versions have been saved for this blog yet.
               </p>
             )}
-            <ol className="mt-5 space-y-2" aria-label="Saved blog revisions">
+            <ol className="mt-5 space-y-2" aria-label="Saved blog revisions" aria-busy={loading}>
               {revisions.map((revision) => (
                 <li key={revision._id} className="rounded-lg border border-gray-200 p-3">
                   <div className="flex items-center justify-between gap-3">
@@ -298,7 +300,7 @@ export default function VersionHistory({
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    disabled={meta.page <= 1}
+                    disabled={loading || meta.page <= 1}
                     onClick={() => {
                       resetDetail();
                       setPage((value) => value - 1);
@@ -309,7 +311,7 @@ export default function VersionHistory({
                   </button>
                   <button
                     type="button"
-                    disabled={meta.page >= meta.totalPages}
+                    disabled={loading || meta.page >= meta.totalPages}
                     onClick={() => {
                       resetDetail();
                       setPage((value) => value + 1);
