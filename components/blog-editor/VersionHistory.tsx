@@ -18,6 +18,19 @@ interface RevisionSummary {
 interface RevisionDetail extends RevisionSummary {
   snapshot: BlogRevisionSnapshot;
 }
+interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+function isPaginationMeta(value: unknown): value is PaginationMeta {
+  if (typeof value !== 'object' || value === null) return false;
+  return ['page', 'limit', 'total', 'totalPages'].every((key) => {
+    const item = (value as Record<string, unknown>)[key];
+    return typeof item === 'number' && Number.isSafeInteger(item) && item >= 0;
+  });
+}
 
 function actorName(actor: RevisionActor): string {
   if (!actor) return 'Unknown editor';
@@ -53,7 +66,7 @@ export default function VersionHistory({
   const [open, setOpen] = useState(false);
   const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
+  const [meta, setMeta] = useState<PaginationMeta>({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [detail, setDetail] = useState<RevisionDetail | null>(null);
@@ -89,11 +102,13 @@ export default function VersionHistory({
         typeof payload !== 'object' ||
         payload === null ||
         !('data' in payload) ||
-        !Array.isArray((payload as { data: unknown }).data)
+        !Array.isArray((payload as { data: unknown }).data) ||
+        !('meta' in payload) ||
+        !isPaginationMeta((payload as { meta: unknown }).meta)
       )
         throw new Error('Unable to load version history.');
       setRevisions((payload as { data: RevisionSummary[] }).data);
-      setMeta((payload as { meta: typeof meta }).meta);
+      setMeta((payload as { meta: PaginationMeta }).meta);
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
         setLoadError(error instanceof Error ? error.message : 'Unable to load version history.');
@@ -131,6 +146,10 @@ export default function VersionHistory({
   const inspect = async (revisionId: string) => {
     if (!slug) return;
     detailControllerRef.current?.abort();
+    setDetail(null);
+    setDetailLoading(false);
+    setDetailError('');
+    setRestoreError('');
     const controller = new AbortController();
     detailControllerRef.current = controller;
     setDetailLoading(true);
