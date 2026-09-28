@@ -59,6 +59,8 @@ The restore API always resolves the site from the authenticated session header/c
 3. Select **Restore this version** and confirm. For published blogs the dialog warns that live content may update.
 4. CogCMS sanitizes the stored source HTML again and runs the current rendering pipeline. The live blog keeps its current slug, status, and `publishedAt`; its previous state remains recoverable because restore itself adds a `restored` revision referencing its source revision.
 
+Restoring is intentionally a last-write-wins editorial action: a revision inspected earlier can replace newer editorial fields saved by another editor. The newer state is already retained in history and remains available for a later restore; the restore transaction records the selected historical state as a new `restored` revision.
+
 ### Design decisions and trade-offs
 
 - Revisions live in a separate collection rather than an embedded array, preventing an unbounded audit trail from growing the primary blog document. The `{ siteId, blogId, createdAt, _id }` index serves newest-first history reads.

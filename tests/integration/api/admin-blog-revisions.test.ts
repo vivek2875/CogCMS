@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
+import { Types } from 'mongoose';
 import { POST as createBlog } from '@/app/api/admin/blogs/route';
 import { DELETE as deleteBlog, PUT as updateBlog } from '@/app/api/admin/blogs/[slug]/route';
 import { GET as listRevisions } from '@/app/api/admin/blogs/[slug]/revisions/route';
@@ -279,6 +280,54 @@ describe('site-scoped blog version history', () => {
     );
     expect(crossRestore.status).toBe(404);
 
+    const localSecondBlog = await createBlog(
+      await authenticatedRequest('http://localhost:3003/api/admin/blogs', {
+        user: admin,
+        siteId: siteA._id.toString(),
+        method: 'POST',
+        json: { title: 'Local second blog', slug: 'local-second', content: '<p>Local</p>' },
+      }),
+      rootContext,
+    );
+    const localSecondBody = await localSecondBlog.json();
+    const localSecondRevision = await BlogRevision.findOne({
+      siteId: siteA._id,
+      blogId: localSecondBody._id,
+    })
+      .lean()
+      .exec();
+    expect(localSecondRevision).not.toBeNull();
+
+    const crossBlogDetail = await getRevision(
+      await authenticatedRequest(
+        `http://localhost:3003/api/admin/blogs/history-post/revisions/${localSecondRevision!._id}`,
+        { user: admin, siteId: siteA._id.toString() },
+      ),
+      revisionContext('history-post', localSecondRevision!._id.toString()),
+    );
+    expect(crossBlogDetail.status).toBe(404);
+    const crossBlogRestore = await restoreRevision(
+      await authenticatedRequest(
+        `http://localhost:3003/api/admin/blogs/history-post/revisions/${localSecondRevision!._id}/restore`,
+        { user: admin, siteId: siteA._id.toString(), method: 'POST', json: {} },
+      ),
+      revisionContext('history-post', localSecondRevision!._id.toString()),
+    );
+    expect(crossBlogRestore.status).toBe(404);
+    expect(
+      await BlogRevision.countDocuments({ siteId: siteA._id, blogId: localSecondBody._id }),
+    ).toBe(1);
+
+    const missingRevisionId = new Types.ObjectId().toString();
+    const missingRestore = await restoreRevision(
+      await authenticatedRequest(
+        `http://localhost:3003/api/admin/blogs/history-post/revisions/${missingRevisionId}/restore`,
+        { user: admin, siteId: siteA._id.toString(), method: 'POST', json: {} },
+      ),
+      revisionContext('history-post', missingRevisionId),
+    );
+    expect(missingRestore.status).toBe(404);
+
     const invalid = await getRevision(
       await authenticatedRequest(
         'http://localhost:3003/api/admin/blogs/history-post/revisions/not-an-id',
@@ -434,8 +483,9 @@ describe('site-scoped blog version history', () => {
     });
   });
 
-  it('keeps the previous state recoverable through an A to B restoration round trip', async () => {
-    const { admin, site, blog } = await createRevisionedBlog('publish');
+  it('intentionally restores an inspected revision over a newer editor save while keeping that state recoverable', async () => {
+    const { admin: editorB, site, blog } = await createRevisionedBlog('publish');
+    const editorA = await createTestUser({ role: 'editor', siteIds: [site._id.toString()] });
     const publishedAt = blog.publishedAt;
     const initial = await BlogRevision.findOne({
       siteId: site._id,
@@ -446,9 +496,18 @@ describe('site-scoped blog version history', () => {
       .exec();
     expect(initial).not.toBeNull();
 
+    const inspectedByEditorA = await getRevision(
+      await authenticatedRequest(
+        `http://localhost:3003/api/admin/blogs/history-post/revisions/${initial!._id}`,
+        { user: editorA, siteId: site._id.toString() },
+      ),
+      revisionContext('history-post', initial!._id.toString()),
+    );
+    expect(inspectedByEditorA.status).toBe(200);
+
     const updated = await updateBlog(
       await authenticatedRequest('http://localhost:3003/api/admin/blogs/history-post', {
-        user: admin,
+        user: editorB,
         siteId: site._id.toString(),
         method: 'PUT',
         json: { title: 'Version B', content: '<h2>Version B</h2><p>Body B</p>' },
@@ -469,7 +528,7 @@ describe('site-scoped blog version history', () => {
     const restoreA = await restoreRevision(
       await authenticatedRequest(
         `http://localhost:3003/api/admin/blogs/history-post/revisions/${initial!._id}/restore`,
-        { user: admin, siteId: site._id.toString(), method: 'POST', json: {} },
+        { user: editorA, siteId: site._id.toString(), method: 'POST', json: {} },
       ),
       revisionContext('history-post', initial!._id.toString()),
     );
@@ -491,6 +550,7 @@ describe('site-scoped blog version history', () => {
       .lean()
       .exec();
     expect(restoredARevision?.snapshot.title).toBe('First title');
+    expect(restoredARevision?.createdBy?.toString()).toBe(editorA._id.toString());
     expect(
       await BlogRevision.exists({ _id: versionB!._id, siteId: site._id, blogId: blog._id }),
     ).toBeTruthy();
@@ -498,7 +558,7 @@ describe('site-scoped blog version history', () => {
     const restoreB = await restoreRevision(
       await authenticatedRequest(
         `http://localhost:3003/api/admin/blogs/history-post/revisions/${versionB!._id}/restore`,
-        { user: admin, siteId: site._id.toString(), method: 'POST', json: {} },
+        { user: editorA, siteId: site._id.toString(), method: 'POST', json: {} },
       ),
       revisionContext('history-post', versionB!._id.toString()),
     );
