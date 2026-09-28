@@ -2,6 +2,7 @@ import type { Model } from 'mongoose';
 import Author from '@/models/Author';
 import ApiKey from '@/models/ApiKey';
 import Blog from '@/models/Blog';
+import BlogRevision from '@/models/BlogRevision';
 import FAQ from '@/models/FAQ';
 import FAQSubmission from '@/models/FAQSubmission';
 import LoginAttempt from '@/models/LoginAttempt';
@@ -17,6 +18,7 @@ export const modelRegistry: Model<any>[] = [
   User,
   LoginAttempt,
   Blog,
+  BlogRevision,
   Author,
   FAQ,
   FAQSubmission,
